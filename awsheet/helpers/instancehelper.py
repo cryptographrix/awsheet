@@ -19,10 +19,11 @@ import boto.vpc
 
 class InstanceHelper(AWSHelper):
     "modular and convergent ec2 instances"
-    def __init__(self, heet, role, **kwargs):
+    def __init__(self, heet, role, normalize_name=False, **kwargs):
         self.heet = heet
         self.role = role
         self.environment = heet.get_value('environment', kwargs, default=heet.get_environment())
+        self.normalize_name = normalize_name
         self.kwargs = kwargs
         self.ami = heet.get_value('ami', kwargs)
         self.pv_ami = heet.get_value('pv_ami', kwargs)
@@ -31,8 +32,6 @@ class InstanceHelper(AWSHelper):
         self.instance_type = heet.get_value('instance_type', kwargs, default='t1.micro')
         # if instance does not support pv ami, use the default hvm_ami if defined
         if not self.supports_pv() and not self.hvm_ami is None:
-            self.heet.logger.debug("using hvm_ami %s because %s instances require hvm" %
-                                   (self.hvm_ami, self.instance_type))
             self.ami = self.hvm_ami
         # if self.ami is not defined (by default or via parameter), use the default pv_ami if defined
         if self.ami is None and not self.pv_ami is None:
@@ -138,6 +137,8 @@ class InstanceHelper(AWSHelper):
         reservation = self.conn.run_instances(self.ami, **run_kwargs)
         return reservation.instances[0]
 
+
+
     def wait_unil_ready(self):
         while True:
             try:
@@ -149,6 +150,22 @@ class InstanceHelper(AWSHelper):
                 self.heet.logger.debug("waiting for instance %s" % self.instance)
             time.sleep(3)
 
+
+
+    def wait_until_terminated(self):
+        while True:
+            try:
+                self.instance.update()
+                if self.instance.state == 'terminated':
+                    break
+                self.heet.logger.debug("%s state=%s" % (self.instance, self.instance.state))
+            except boto.exception.EC2ResponseError as e:
+                self.heet.logger.debug("waiting for instance %s" % self.instance)
+            time.sleep(3)
+        return
+
+
+
     def converge(self):
         if not self.get_instance():
             self.instance = self.provision_resource()
@@ -159,6 +176,8 @@ class InstanceHelper(AWSHelper):
             NickNameHelper(self.heet, self.get_dnsname(), self)
         if self.get_index_dnsname():
             NickNameHelper(self.heet, self.get_index_dnsname(), self)
+        # set the security groups in case they have changes since the instance was first created
+        self.conn.modify_instance_attribute(self.get_instance().id, 'groupSet', self.security_groups)
         self.post_converge_hook()
         name = self.get_dnsname()
         if not name:
@@ -167,6 +186,8 @@ class InstanceHelper(AWSHelper):
             name = self.get_instance().ip_address
         self.heet.logger.info("the following instance is ready '%s'" % name)
         return self
+
+
 
     def destroy(self):
         # TODO consider deleting all CNAMEs that point to public dns name
@@ -180,6 +201,10 @@ class InstanceHelper(AWSHelper):
             NickNameHelper(self.heet, self.get_index_dnsname(), self).destroy()
         self.heet.logger.info("terminating %s" % instance)
         self.conn.terminate_instances([instance.id])
+        self.wait_until_terminated()
+        return
+
+
 
     def get_cname_target(self):
         """returns public_dns_name"""
@@ -218,10 +243,14 @@ class InstanceHelper(AWSHelper):
     def set_tag(self, key, value):
         """add tag to the instance. This operation is idempotent. Tags are automatically destroyed when instances are terminated"""
         instance = self.get_instance()
-        if key in instance.tags and instance.tags[key] == value:
-            return
-        self.heet.logger.debug("setting tag %s=%s on instance %s" % (key, value, instance))
-        instance.add_tag(key, value)
+        if instance is None:
+            self.heet.logger.debug("Can't set tag on null instance")
+
+        else:
+            if key in instance.tags and instance.tags[key] == value:
+                return
+            self.heet.logger.debug("setting tag %s=%s on instance %s" % (key, value, instance))
+            instance.add_tag(key, value)
 
     # cache whether or not a subnet is public or private
     subnet_public = {}
@@ -260,5 +289,5 @@ class InstanceHelper(AWSHelper):
     def supports_pv(self):
         """Return True when self.instance_type can boot from paravirtual EBS image (not HVM)
         http://aws.amazon.com/amazon-linux-ami/instance-type-matrix/"""
-        return not re.search('^(i2|cc2|g2|cg1)\.', self.instance_type)
+        return not re.search('^(i2|cc2|g2|cg1|r3|t2)\.', self.instance_type)
 

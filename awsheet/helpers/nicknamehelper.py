@@ -11,7 +11,7 @@ class NickNameHelper(AWSHelper):
         self.value = value
         self.zone_id = self.heet.get_value('zone_id', required=True)
         self.domain = self.heet.get_value('domain', required=True)
-        self.ttl = self.heet.get_value('ttl', kwargs, default=300)
+        self.ttl = self.heet.get_value('ttl', kwargs, default=60)
         self.conn = boto.connect_route53(
             aws_access_key_id=heet.access_key_id,
             aws_secret_access_key=heet.secret_access_key)
@@ -41,8 +41,8 @@ class NickNameHelper(AWSHelper):
             if current_value == self.value:
                 return self
             # if record already exists AND points at wrong value, delete it before creating new record
-            self.heet.logger.info("deleting old CNAME record %s to %s" % (self.name, current_value))
-            self.zone.delete_cname(self.name)
+            self.heet.logger.info("deleting old record %s to %s" % (self.name, current_value))
+            self.zone.delete_record(current_record)
 
         # If the target is an IP address, we must create an A
         # record. If the target is a DNS name, we want a CNAME
