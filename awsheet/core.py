@@ -27,15 +27,19 @@ class AWSHeet:
         self.logger.addHandler(handler)
         self.base_dir = os.path.dirname(os.path.realpath(sys.argv[0]))
 
+
         #- allow user to explicitly set project name
+        default_base_name = os.path.basename(sys.argv[0]).split('.')[0]
+
         if name is None:
-            self.base_name = os.path.basename(sys.argv[0]).split('.')[0]
+            self.base_name = default_base_name
         else:
+            self.logger.info('Using parameter-based name override: {}'.format(name))
             self.base_name = name
 
         self.load_creds()
 
-        #- resource reference table - this is used to refer to other resources by '@-name'
+        #- resource reference table - this is used to refer to other resources by '@name'
         self.resource_refs = dict()
 
         #- If a resource needs some events to occur before it can fully converge then 
@@ -102,10 +106,16 @@ class AWSHeet:
         """Adds resources to a list and calls that resource's converge method"""
         self.resources.append(resource)
         if not self.args.destroy:
-            #-TODO: catch exceptions in the converge() cycle
+            #- catch exceptions in the converge() cycle
             #- to avoid calling the atexit functions
             #- when we are exiting because of an error
-            resource.converge()
+            try:
+                resource.converge()
+            except Exception as err:
+                self.logger.error('Exception caught in converge cycle: {}'.format(str(err)))
+                #- skip execution of registered atexit functions
+                os._exit(os.EX_SOFTWARE)
+
 
         return resource
 

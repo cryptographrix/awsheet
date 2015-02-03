@@ -1,7 +1,10 @@
 *~
 *.pyc
+awsheet/.pythoscope/
+*.pickle
 awsheet.egg-info/
 _build/
 dist/
 build/*
 sgh_todo
+*.pickle
